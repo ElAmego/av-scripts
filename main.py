@@ -5,8 +5,8 @@ import sqlite3 as db
 import unicodedata
 
 
-# Получение цифры для ссылки по марке авто.
-def cars_number():
+# Получение марки авто.
+def car_name():
     cars = car_list()
     while True:
         name = input('Введите марку авто. Пример: bmw, alfa_romeo.:')
@@ -19,20 +19,20 @@ def cars_number():
             print('Название авто введено некорректно или такого нету.')
 
 
-# Получение и проверка на цифру/число.
-def get_number():
+# Получение кол-ва страниц.
+def get_pages():
     while True:
         try:
-            number = int(input('Введите число: '))
+            pages = int(input('Введите кол-во страниц: '))
         except ValueError:
-            print('Введите корректное число.')
+            print('Введите корректное кол-во.')
         else:
             break
-    return number
+    return pages
 
 
 # Парсинг.
-def parser(car_number_data, pages):
+def parser(name_info, pages):
     car_db = []
 
     headers = {
@@ -41,7 +41,7 @@ def parser(car_number_data, pages):
     }
 
     for i in range(1, pages+1):
-        url = f'https://cars.av.by/filter?brands[0][brand]={car_number_data[1]}&page=' + str(i)
+        url = f'https://cars.av.by/filter?brands[0][brand]={name_info[1]}&page=' + str(i)
 
         req = requests.get(url, headers=headers)
         src = req.text
@@ -76,27 +76,9 @@ def parser(car_number_data, pages):
     return car_db
 
 
-def write_in_db(cars_db, car_marka):
-    with db.connect('cars.db') as connect:
-        cursor = connect.cursor()
-        create_table(cursor, car_marka)
-
-        for car in cars_db:
-            cursor.execute(f"""INSERT INTO {car_marka[0]} (name, year, transmission, engine, body, mileage, price, link)
-            VALUES (
-            '{car['name']}',
-            '{car['year']}',
-            '{car['transmission']}',
-            '{car['engine']}',
-            '{car['body']}',
-            '{car['mileage']}',
-            '{car['price']}',
-            '{car['link']}'
-            )""")
-
-
-def create_table(cursor, car_marka):
-    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {car_marka[0]} (
+# Создание таблицы в БД.
+def create_table(cursor, name):
+    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {name[0]} (
                                 car_id INTEGER PRIMARY KEY AUTOINCREMENT,
                                 name TEXT,
                                 year TEXT,
@@ -108,11 +90,42 @@ def create_table(cursor, car_marka):
                                 link TEXT)""")
 
 
+# Запись данных в БД.
+def write_in_db(cars, name):
+    with db.connect('cars.db') as connect:
+        cursor = connect.cursor()
+        create_table(cursor, name)
+        links_in_db = get_links(cursor, name[0])
+
+        for car in cars:
+            if car['link'] not in links_in_db:
+                cursor.execute(f"""INSERT INTO {name[0]} (name, year, transmission, engine, body, mileage, price, link)
+                VALUES (
+                '{car['name']}',
+                '{car['year']}',
+                '{car['transmission']}',
+                '{car['engine']}',
+                '{car['body']}',
+                '{car['mileage']}',
+                '{car['price']}',
+                '{car['link']}'
+                )""")
+
+
+# Получение ссылок из таблицы.
+def get_links(cursor, name):
+    links_arr = []
+    cursor.execute(f"SELECT link FROM {name}")
+    for link in cursor.fetchall():
+        links_arr.append(' '.join(link))
+    return links_arr
+
+
 def main():
-    car_number = cars_number()
-    pages = get_number()
-    cars = parser(car_number, pages)
-    write_in_db(cars, car_number)
+    name = car_name()
+    pages = get_pages()
+    cars = parser(name, pages)
+    write_in_db(cars, name)
 
 
 if __name__ == '__main__':
