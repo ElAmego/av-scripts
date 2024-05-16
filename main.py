@@ -1,132 +1,132 @@
 import requests
 from bs4 import BeautifulSoup
-from car_list import car_list
-import sqlite3 as db
-import unicodedata
 
 
-# Получение марки авто.
-def car_name():
-    cars = car_list()
-    while True:
-        name = input('Введите марку авто. Пример: bmw, alfa_romeo.:')
-        if name in cars:
-            return [
-                name,
-                str(cars.get(name)),
-            ]
-        else:
-            print('Название авто введено некорректно или такого нету.')
+link_list = []
+car_list = []
+min_price = 5000
+max_price = 20000
+car_key = 2521
+total = 5
+page = 0
+now = 0
+isWork = True
 
+headers = {
+    'Accept': '*/*',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0'
+}
 
-# Получение кол-ва страниц.
-def get_pages():
-    while True:
-        try:
-            pages = int(input('Введите кол-во страниц: '))
-        except ValueError:
-            print('Введите корректное кол-во.')
-        else:
-            break
-    return pages
+while isWork:
+    page += 1
+    url = f'https://cars.av.by/filter?brands[0][brand]={car_key}&price_usd[min]={min_price}&price_usd[max]={max_price}&page=' + str(page)
+    req = requests.get(url, headers=headers)
+    src = req.text
+    soup = BeautifulSoup(src, 'lxml')
 
+    if soup.find(class_='listing__empty'):
+        break
 
-# Парсинг.
-def parser(name_info, pages):
-    car_db = []
+    all_cars = soup.find_all('div', class_=['listing-item', 'listing-top listing-top--color'])
 
-    headers = {
-        'Accept': '*/*',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0'
-    }
+    if len(all_cars) < 25:
+        isWork = False
 
-    for i in range(1, pages+1):
-        url = f'https://cars.av.by/filter?brands[0][brand]={name_info[1]}&page=' + str(i)
-
-        req = requests.get(url, headers=headers)
-        src = req.text
-        soup = BeautifulSoup(src, 'lxml',)
-
-        cars_data = soup.find_all(class_='listing-item__wrap')
-        if soup.find(class_='listing__empty'):
+    for num in range(0, len(all_cars)):
+        if now >= total:
+            isWork = False
             break
 
-        for car_data in cars_data:
-            car_data_tth = car_data.find(class_='listing-item__params').find_all('div')[1].text.split(', ')
+        if num == 25:
+            page += 1
 
-            car = {
-                'name': unicodedata.normalize('NFKD', car_data.find(class_='listing-item__link').text),
-                'year': unicodedata.normalize('NFKD', car_data.find(class_='listing-item__params')
-                                              .find_all('div')[0].text),
-                'transmission': unicodedata.normalize('NFKD', car_data_tth[0]),
-                'engine': unicodedata.normalize('NFKD', car_data_tth[1] + " " + car_data_tth[2]),
-                'body': unicodedata.normalize('NFKD', car_data_tth[3]),
-                'mileage': unicodedata.normalize('NFKD', car_data.find(class_='listing-item__params')
-                                                 .find_all('div')[2].text),
-                'price': unicodedata.normalize('NFKD', car_data.find(class_='listing-item__priceusd').text),
-                'link': unicodedata.normalize('NFKD', 'https://cars.av.by' + car_data
-                                              .find(class_='listing-item__link').get('href')),
-            }
+        default_car = all_cars[num].find('div', class_=['listing-item__wrap'])
 
-            car_db.append(car)
+        if default_car:
+            default_car_parameters = default_car.find('div', class_=['listing-item__params']).find_all('div')
+            car_link = 'https://cars.av.by' + default_car.find('a', class_=['listing-item__link']).get('href')
+            if car_link not in link_list:
+                if default_car_parameters[1].text.split(',')[1][1:] == 'электро':
+                    car = {
+                        'title': default_car.find('span', class_=['link-text']).text.split(',')[0],
+                        'year': default_car_parameters[0].text[:4],
+                        'transmission': default_car_parameters[1].text.split(',')[0],
+                        'power_reserve': default_car_parameters[1].text.split(',')[3][1:].replace('\xa0', ''),
+                        # запас хода только для электричек
+                        'engine': default_car_parameters[1].text.split(',')[1][1:],
+                        'body': default_car_parameters[1].text.split(',')[2][1:],
+                        'mileage': default_car_parameters[2].text[:-3].replace('\u2009', ''),
+                        'description': default_car.find('div', class_=['listing-item__message']).text.replace('\n', ''),
+                        'location': default_car.find('div', class_=['listing-item__location']).text,
+                        'price': default_car.find('div', class_=['listing-item__priceusd']).text[2:-2]
+                        .replace('\u2009', ''),
+                        'link': car_link,
+                        'img_link': default_car.find('img').get('data-src'),
+                    }
 
-        print(f'Страница {i} обработана...')
+                else:
+                    if default_car.find('div', class_=['listing-item__message']):
+                        desc = default_car.find('div', class_=['listing-item__message']).text.replace('\n', '')
+                    else:
+                        desc = ''
 
-    print('Готово.')
-    return car_db
+                    if len(default_car_parameters[1].text.split(',')) != 3:
+                        car = {
+                            'title': default_car.find('span', class_=['link-text']).text.split(',')[0],
+                            'year': default_car_parameters[0].text[:4],
+                            'transmission': default_car_parameters[1].text.split(',')[0],
+                            'volume': default_car_parameters[1].text.split(',')[1][1:4],
+                            'engine': default_car_parameters[1].text.split(',')[2][1:],
+                            'body': default_car_parameters[1].text.split(',')[3][1:],
+                            'mileage': default_car_parameters[2].text[:-3].replace('\u2009', ''),
+                            'description': desc,
+                            'location': default_car.find('div', class_=['listing-item__location']).text,
+                            'price': default_car.find('div', class_=['listing-item__priceusd']).text[2:-2]
+                            .replace('\u2009', ''),
+                            'link': car_link,
+                            'img_link': default_car.find('img').get('data-src'),
+                        }
 
+                    else:
+                        car = {
+                            'title': default_car.find('span', class_=['link-text']).text.split(',')[0],
+                            'year': default_car_parameters[0].text[:4],
+                            'transmission': default_car_parameters[1].text.split(',')[0],
+                            'volume': '',
+                            'engine': default_car_parameters[1].text.split(',')[1][1:],
+                            'body': default_car_parameters[1].text.split(',')[2][1:],
+                            'mileage': default_car_parameters[2].text[:-3].replace('\u2009', ''),
+                            'description': desc,
+                            'location': default_car.find('div', class_=['listing-item__location']).text,
+                            'price': default_car.find('div', class_=['listing-item__priceusd']).text[2:-2]
+                            .replace('\u2009', ''),
+                            'link': car_link,
+                            'img_link': default_car.find('img').get('data-src'),
+                        }
 
-# Создание таблицы в БД.
-def create_table(cursor, name):
-    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {name[0]} (
-                                car_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                name TEXT,
-                                year TEXT,
-                                transmission TEXT,
-                                engine TEXT,
-                                body TEXT,
-                                mileage TEXT,
-                                price TEXT,
-                                link TEXT)""")
+                car_list.append(car)
+                now += 1
 
+        else:
+            car_link = 'https://cars.av.by' + all_cars[num].find('a', class_=['listing-top__title-link']).get('href')
+            if car_link not in link_list:
+                top_car_parameters = all_cars[num].find('div', class_=['listing-top__params']).text.split(',')
+                car = {
+                    'title': all_cars[num].find('span', class_=['link-text']).text.split(',')[0],
+                    'year': top_car_parameters[0][:4],
+                    'transmission': top_car_parameters[1].split(',')[0][1:],
+                    'volume': top_car_parameters[2][1:4],
+                    'engine': top_car_parameters[3][1:],
+                    'body': top_car_parameters[4][1:],
+                    'mileage': top_car_parameters[5][:-3].replace('\u2009', ''),
+                    'description': all_cars[num].find('div', class_=['listing-top__message']).text.replace('\n', ''),
+                    'location': all_cars[num].find('div', class_=['listing-top__info-location']).text,
+                    'price': all_cars[num].find('div', class_=['listing-top__price-usd']).text[2:-2].replace('\u2009', ''),
+                    'link': car_link,
+                    'img_link': all_cars[num].find('img').get('data-src'),
+                }
+                car_list.append(car)
+                now += 1
 
-# Запись данных в БД.
-def write_in_db(cars, name):
-    with db.connect('cars.db') as connect:
-        cursor = connect.cursor()
-        create_table(cursor, name)
-        links_in_db = get_links(cursor, name[0])
-
-        for car in cars:
-            if car['link'] not in links_in_db:
-                cursor.execute(f"""INSERT INTO {name[0]} (name, year, transmission, engine, body, mileage, price, link)
-                VALUES (
-                '{car['name']}',
-                '{car['year']}',
-                '{car['transmission']}',
-                '{car['engine']}',
-                '{car['body']}',
-                '{car['mileage']}',
-                '{car['price']}',
-                '{car['link']}'
-                )""")
-
-
-# Получение ссылок из таблицы.
-def get_links(cursor, name):
-    links_arr = []
-    cursor.execute(f"SELECT link FROM {name}")
-    for link in cursor.fetchall():
-        links_arr.append(' '.join(link))
-    return links_arr
-
-
-def main():
-    name = car_name()
-    pages = get_pages()
-    cars = parser(name, pages)
-    write_in_db(cars, name)
-
-
-if __name__ == '__main__':
-    main()
+for car in car_list:
+    print(car['img_link'])
